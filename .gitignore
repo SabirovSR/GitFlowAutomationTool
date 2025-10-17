@@ -1,0 +1,8 @@
+# Временные файлы
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Git flow состояние (локальное)
+.git/git-flow-state
