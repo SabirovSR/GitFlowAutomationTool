@@ -1,0 +1,14 @@
+# Git Flow Helper files
+.git-flow-helper-state
+*.bak
+*.tmp
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db

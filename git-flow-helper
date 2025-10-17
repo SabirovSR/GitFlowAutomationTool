@@ -1,0 +1,1068 @@
+#!/bin/bash
+
+# ==============================================
+# git-flow-helper - Расширенный плагин для GitFlow
+# Автор: AI Assistant (на основе работы Сабирова Савелия Руслановича)
+# Версия: 2.0
+# ==============================================
+
+# Цвета для сообщений
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+WHITE='\033[0;37m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+# Конфигурация
+CONFIG_FILE="$HOME/.git-flow-helper.conf"
+STATE_FILE=".git-flow-helper-state"
+
+# Основные ветки
+MASTER_BRANCH="master"
+TEST_BRANCH="test"
+RELEASE_OE_BRANCH="release_oe"
+RELEASE_PE_BRANCH="release_pe"
+
+# ==============================================
+# Утилитарные функции
+# ==============================================
+
+# Функция для вывода заголовков
+section() {
+    echo -e "\n${CYAN}${BOLD}=== $1 ===${NC}"
+}
+
+# Функция для вывода подзаголовков
+subsection() {
+    echo -e "\n${BLUE}--- $1 ---${NC}"
+}
+
+# Функция для вывода успеха
+success() {
+    echo -e "${GREEN}✔ $1${NC}"
+}
+
+# Функция для вывода ошибки
+error() {
+    echo -e "${RED}✗ $1${NC}"
+}
+
+# Функция для вывода предупреждения
+warning() {
+    echo -e "${YELLOW}⚠ $1${NC}"
+}
+
+# Функция для вывода информации
+info() {
+    echo -e "${CYAN}ℹ $1${NC}"
+}
+
+# Функция для вывода вопроса
+ask() {
+    echo -e "${MAGENTA}? $1${NC}"
+}
+
+# Функция проверки наличия команды
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+# Функция для сохранения состояния
+save_state() {
+    local key=$1
+    local value=$2
+    echo "$key=$value" >> "$STATE_FILE"
+}
+
+# Функция для загрузки состояния
+load_state() {
+    local key=$1
+    if [[ -f "$STATE_FILE" ]]; then
+        grep "^$key=" "$STATE_FILE" | cut -d'=' -f2-
+    fi
+}
+
+# Функция для очистки состояния
+clear_state() {
+    rm -f "$STATE_FILE"
+}
+
+# Функция для проверки git репозитория
+check_git_repo() {
+    if ! git rev-parse --is-inside-work-tree &>/dev/null; then
+        error "Не находимся в git репозитории!"
+        exit 1
+    fi
+}
+
+# Функция для проверки незафиксированных изменений
+check_uncommitted_changes() {
+    if [[ -n "$(git status --porcelain)" ]]; then
+        warning "Обнаружены незафиксированные изменения:"
+        git status --porcelain
+        echo ""
+        read -p "Продолжить несмотря на изменения? (y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            error "Прервано пользователем"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Функция для получения текущей ветки
+get_current_branch() {
+    git rev-parse --abbrev-ref HEAD
+}
+
+# Функция для проверки существования ветки
+branch_exists() {
+    local branch=$1
+    git show-ref --verify --quiet "refs/heads/$branch"
+}
+
+# Функция для проверки существования удаленной ветки
+remote_branch_exists() {
+    local branch=$1
+    git ls-remote --exit-code --heads origin "$branch" &>/dev/null
+}
+
+# Функция для парсинга feature ветки
+parse_feature_branch() {
+    local branch=$1
+    if [[ "$branch" =~ ^tasks/([^/]+)/([^/]+)$ ]]; then
+        echo "${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"
+        return 0
+    fi
+    return 1
+}
+
+# Функция для парсинга hotfix ветки
+parse_hotfix_branch() {
+    local branch=$1
+    if [[ "$branch" =~ ^hotfixes/(pe|oe|iz)/([^/]+)$ ]]; then
+        echo "${BASH_REMATCH[1]}:${BASH_REMATCH[2]}"
+        return 0
+    fi
+    return 1
+}
+
+# ==============================================
+# Функции для работы с коммитами
+# ==============================================
+
+# Функция для выбора коммитов
+select_commits() {
+    local branch=${1:-HEAD}
+    local exclude_merges=${2:-true}
+    
+    section "ВЫБОР КОММИТОВ"
+    
+    # Получаем список коммитов
+    local commits_cmd="git log --oneline -20 $branch"
+    if [[ "$exclude_merges" == "true" ]]; then
+        commits_cmd="$commits_cmd --no-merges"
+    fi
+    
+    echo -e "${CYAN}Последние коммиты:${NC}"
+    echo "--------------------"
+    local i=1
+    declare -a commit_hashes
+    while IFS= read -r line; do
+        commit_hashes[$i]=$(echo "$line" | awk '{print $1}')
+        echo -e "${YELLOW}[$i]${NC} $line"
+        ((i++))
+    done < <(eval "$commits_cmd")
+    echo "--------------------"
+    
+    ask "Выберите коммиты для доведения:"
+    echo "  - Введите номера через пробел (например: 1 2 3)"
+    echo "  - Введите диапазон (например: 1-5)"
+    echo "  - Введите 'last' для последнего коммита"
+    echo "  - Введите 'all' для всех коммитов"
+    read -p "> " commit_selection
+    
+    local selected_commits=""
+    
+    if [[ "$commit_selection" == "last" ]]; then
+        selected_commits="${commit_hashes[1]}"
+    elif [[ "$commit_selection" == "all" ]]; then
+        for hash in "${commit_hashes[@]}"; do
+            [[ -n "$hash" ]] && selected_commits="$selected_commits $hash"
+        done
+    elif [[ "$commit_selection" =~ ^[0-9]+-[0-9]+$ ]]; then
+        local start=$(echo "$commit_selection" | cut -d'-' -f1)
+        local end=$(echo "$commit_selection" | cut -d'-' -f2)
+        for ((j=$start; j<=$end; j++)); do
+            [[ -n "${commit_hashes[$j]}" ]] && selected_commits="$selected_commits ${commit_hashes[$j]}"
+        done
+    else
+        for num in $commit_selection; do
+            [[ -n "${commit_hashes[$num]}" ]] && selected_commits="$selected_commits ${commit_hashes[$num]}"
+        done
+    fi
+    
+    # Возвращаем в обратном порядке для правильного cherry-pick
+    echo "$selected_commits" | tr ' ' '\n' | tac | tr '\n' ' '
+}
+
+# Функция для squash коммитов
+squash_commits() {
+    local branch=$1
+    local base_branch=${2:-$MASTER_BRANCH}
+    
+    section "SQUASH КОММИТОВ"
+    
+    info "Объединение коммитов в ветке $branch"
+    
+    # Получаем количество коммитов для squash
+    local commit_count=$(git rev-list --count "$base_branch".."$branch")
+    
+    if [[ $commit_count -le 1 ]]; then
+        info "В ветке только один коммит, squash не требуется"
+        return 0
+    fi
+    
+    ask "Найдено $commit_count коммитов. Объединить в один? (y/n)"
+    read -n 1 -r
+    echo
+    
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        # Сохраняем сообщение коммита
+        local commit_message
+        ask "Введите сообщение для объединенного коммита:"
+        read -r commit_message
+        
+        # Выполняем soft reset и создаем новый коммит
+        git reset --soft "$base_branch"
+        git commit -m "$commit_message"
+        
+        success "Коммиты успешно объединены"
+        return 0
+    else
+        info "Squash пропущен"
+        return 0
+    fi
+}
+
+# ==============================================
+# Функции для работы с ветками
+# ==============================================
+
+# Функция для создания или обновления ветки
+checkout_or_create_branch() {
+    local branch=$1
+    local base_branch=$2
+    local force_recreate=${3:-false}
+    
+    if [[ "$force_recreate" == "true" ]] && branch_exists "$branch"; then
+        warning "Удаление существующей ветки $branch"
+        git branch -D "$branch"
+    fi
+    
+    if branch_exists "$branch"; then
+        info "Переключение на существующую ветку $branch"
+        git checkout "$branch"
+        
+        # Проверяем, нужно ли обновить ветку
+        if remote_branch_exists "$branch"; then
+            info "Обновление ветки из удаленного репозитория"
+            git pull origin "$branch"
+        fi
+    else
+        info "Создание новой ветки $branch от $base_branch"
+        
+        # Обновляем base_branch
+        if remote_branch_exists "$base_branch"; then
+            git fetch origin "$base_branch:$base_branch"
+        fi
+        
+        git checkout -b "$branch" "$base_branch"
+    fi
+}
+
+# ==============================================
+# Основные функции доставки
+# ==============================================
+
+# Функция для доставки feature
+deliver_feature() {
+    local current_branch=$(get_current_branch)
+    
+    section "ДОСТАВКА FEATURE"
+    
+    # Проверяем, что мы в feature ветке
+    if ! parse_result=$(parse_feature_branch "$current_branch"); then
+        error "Вы не в feature ветке (ожидается tasks/*/*)"
+        return 1
+    fi
+    
+    IFS=':' read -r parent_jira jira <<< "$parse_result"
+    
+    local stable_branch="tasks/$parent_jira/stable_$jira"
+    local target_branch
+    
+    # Выбираем целевую ветку
+    subsection "Выбор целевой ветки"
+    echo "1) test (обычный сценарий)"
+    echo "2) release_oe"
+    echo "3) release_pe"
+    read -p "Выберите целевую ветку [1-3]: " target_choice
+    
+    case $target_choice in
+        1) target_branch="test" ;;
+        2) target_branch="release_oe" ;;
+        3) target_branch="release_pe" ;;
+        *) target_branch="test" ;;
+    esac
+    
+    local merge_branch="tasks/$parent_jira/${target_branch}_$jira"
+    
+    info "Feature ветка: $current_branch"
+    info "Stable ветка: $stable_branch"
+    info "Merge ветка: $merge_branch"
+    info "Целевая ветка: $target_branch"
+    
+    # Выбираем коммиты для доставки
+    local commits=$(select_commits)
+    if [[ -z "$commits" ]]; then
+        error "Коммиты не выбраны"
+        return 1
+    fi
+    
+    # Сохраняем состояние
+    save_state "action" "deliver_feature"
+    save_state "current_branch" "$current_branch"
+    save_state "stable_branch" "$stable_branch"
+    save_state "merge_branch" "$merge_branch"
+    save_state "target_branch" "$target_branch"
+    save_state "commits" "$commits"
+    
+    # Переходим на stable ветку
+    subsection "Работа со stable веткой"
+    checkout_or_create_branch "$stable_branch" "$MASTER_BRANCH"
+    
+    # Cherry-pick коммитов
+    subsection "Cherry-pick коммитов"
+    local failed=false
+    for commit in $commits; do
+        info "Перенос коммита $commit"
+        if ! git cherry-pick -m 1 "$commit" 2>/dev/null; then
+            warning "Конфликт при cherry-pick коммита $commit"
+            echo ""
+            error "ОБНАРУЖЕН КОНФЛИКТ!"
+            echo "1. Разрешите конфликт вручную"
+            echo "2. Выполните: git add <файлы>"
+            echo "3. Запустите: git-flow-helper --continue"
+            save_state "cherry_pick_in_progress" "true"
+            save_state "remaining_commits" "${commits/$commit/}"
+            return 1
+        fi
+    done
+    
+    # Push stable ветки
+    info "Отправка stable ветки"
+    git push origin "$stable_branch"
+    
+    # Спрашиваем про squash
+    ask "Хотите объединить коммиты в stable ветке? (y/n)"
+    read -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        squash_commits "$stable_branch" "$MASTER_BRANCH"
+        git push --force origin "$stable_branch"
+    fi
+    
+    # Переходим на merge ветку
+    subsection "Работа с merge веткой"
+    checkout_or_create_branch "$merge_branch" "$target_branch"
+    
+    # Merge со stable веткой
+    subsection "Слияние со stable веткой"
+    if ! git merge "$stable_branch" --no-edit; then
+        warning "Конфликт при merge"
+        echo ""
+        error "ОБНАРУЖЕН КОНФЛИКТ!"
+        echo "1. Разрешите конфликт вручную"
+        echo "2. Выполните: git add <файлы>"
+        echo "3. Запустите: git-flow-helper --continue"
+        save_state "merge_in_progress" "true"
+        return 1
+    fi
+    
+    # Push merge ветки
+    info "Отправка merge ветки"
+    git push origin "$merge_branch"
+    
+    # Возвращаемся на исходную ветку
+    git checkout "$current_branch"
+    
+    # Очищаем состояние
+    clear_state
+    
+    section "ЗАВЕРШЕНО"
+    success "Доставка успешно завершена!"
+    echo ""
+    info "Stable ветка: $stable_branch"
+    info "Merge ветка для PR: $merge_branch -> $target_branch"
+    echo ""
+    echo -e "${GREEN}Теперь создайте Pull Request:${NC}"
+    echo -e "${YELLOW}$merge_branch${NC} → ${YELLOW}$target_branch${NC}"
+}
+
+# Функция для обновления PR
+update_pr() {
+    local current_branch=$(get_current_branch)
+    
+    section "ОБНОВЛЕНИЕ PULL REQUEST"
+    
+    # Проверяем, что мы в feature ветке
+    if ! parse_result=$(parse_feature_branch "$current_branch"); then
+        error "Вы не в feature ветке (ожидается tasks/*/*)"
+        return 1
+    fi
+    
+    IFS=':' read -r parent_jira jira <<< "$parse_result"
+    
+    local stable_branch="tasks/$parent_jira/stable_$jira"
+    
+    # Определяем существующие merge ветки
+    subsection "Поиск существующих PR"
+    local merge_branches=()
+    for target in test release_oe release_pe; do
+        local branch="tasks/$parent_jira/${target}_$jira"
+        if remote_branch_exists "$branch"; then
+            merge_branches+=("$branch:$target")
+            info "Найден PR: $branch -> $target"
+        fi
+    done
+    
+    if [[ ${#merge_branches[@]} -eq 0 ]]; then
+        error "Не найдено существующих PR для обновления"
+        return 1
+    fi
+    
+    # Выбираем какой PR обновить
+    if [[ ${#merge_branches[@]} -eq 1 ]]; then
+        local selected_merge="${merge_branches[0]}"
+    else
+        subsection "Выберите PR для обновления"
+        local i=1
+        for mb in "${merge_branches[@]}"; do
+            echo "$i) $mb"
+            ((i++))
+        done
+        read -p "Выберите [1-${#merge_branches[@]}]: " choice
+        selected_merge="${merge_branches[$((choice-1))]}"
+    fi
+    
+    IFS=':' read -r merge_branch target_branch <<< "$selected_merge"
+    
+    info "Обновление PR: $merge_branch -> $target_branch"
+    
+    # Выбираем коммиты для добавления
+    local commits=$(select_commits)
+    if [[ -z "$commits" ]]; then
+        error "Коммиты не выбраны"
+        return 1
+    fi
+    
+    # Обновляем stable ветку
+    subsection "Обновление stable ветки"
+    git checkout "$stable_branch"
+    git pull origin "$stable_branch"
+    
+    # Cherry-pick новых коммитов
+    for commit in $commits; do
+        info "Перенос коммита $commit"
+        if ! git cherry-pick -m 1 "$commit" 2>/dev/null; then
+            warning "Конфликт при cherry-pick коммита $commit"
+            echo ""
+            error "ОБНАРУЖЕН КОНФЛИКТ!"
+            echo "1. Разрешите конфликт вручную"
+            echo "2. Выполните: git add <файлы>"
+            echo "3. Выполните: git cherry-pick --continue"
+            echo "4. Запустите скрипт снова для продолжения"
+            return 1
+        fi
+    done
+    
+    git push origin "$stable_branch"
+    
+    # Пересоздаем merge ветку
+    subsection "Пересоздание merge ветки"
+    warning "Удаление старой merge ветки"
+    git branch -D "$merge_branch" 2>/dev/null
+    
+    info "Создание новой merge ветки от $target_branch"
+    git fetch origin "$target_branch:$target_branch"
+    git checkout -b "$merge_branch" "$target_branch"
+    
+    # Merge со stable веткой
+    subsection "Слияние со stable веткой"
+    if ! git merge "$stable_branch" --no-edit; then
+        warning "Конфликт при merge"
+        echo ""
+        error "ОБНАРУЖЕН КОНФЛИКТ!"
+        echo "1. Разрешите конфликт вручную"
+        echo "2. Выполните: git add <файлы>"
+        echo "3. Выполните: git commit"
+        echo "4. Выполните: git push --force origin $merge_branch"
+        return 1
+    fi
+    
+    # Force push для обновления PR
+    info "Обновление PR (force push)"
+    git push --force origin "$merge_branch"
+    
+    # Возвращаемся на исходную ветку
+    git checkout "$current_branch"
+    
+    section "ЗАВЕРШЕНО"
+    success "PR успешно обновлен!"
+    echo ""
+    info "Обновленная ветка: $merge_branch -> $target_branch"
+}
+
+# Функция для продолжения после конфликта
+continue_delivery() {
+    section "ПРОДОЛЖЕНИЕ ДОСТАВКИ"
+    
+    if [[ ! -f "$STATE_FILE" ]]; then
+        error "Не найдено сохраненное состояние доставки"
+        return 1
+    fi
+    
+    # Загружаем состояние
+    local action=$(load_state "action")
+    local current_branch=$(load_state "current_branch")
+    local stable_branch=$(load_state "stable_branch")
+    local merge_branch=$(load_state "merge_branch")
+    local target_branch=$(load_state "target_branch")
+    
+    info "Восстановлено состояние:"
+    info "  Действие: $action"
+    info "  Feature ветка: $current_branch"
+    info "  Stable ветка: $stable_branch"
+    info "  Merge ветка: $merge_branch"
+    
+    local current=$(get_current_branch)
+    
+    # Проверяем, где мы находимся
+    if [[ "$(load_state cherry_pick_in_progress)" == "true" ]]; then
+        if [[ "$current" != "$stable_branch" ]]; then
+            error "Ожидается нахождение в ветке $stable_branch"
+            return 1
+        fi
+        
+        # Завершаем cherry-pick
+        if git cherry-pick --continue 2>/dev/null; then
+            success "Cherry-pick завершен"
+        fi
+        
+        # Продолжаем с оставшимися коммитами
+        local remaining=$(load_state "remaining_commits")
+        if [[ -n "$remaining" ]]; then
+            for commit in $remaining; do
+                info "Перенос коммита $commit"
+                if ! git cherry-pick -m 1 "$commit" 2>/dev/null; then
+                    warning "Конфликт при cherry-pick коммита $commit"
+                    save_state "remaining_commits" "${remaining/$commit/}"
+                    return 1
+                fi
+            done
+        fi
+        
+        # Очищаем флаг cherry-pick
+        sed -i '/cherry_pick_in_progress/d' "$STATE_FILE"
+        
+        # Push stable ветки
+        info "Отправка stable ветки"
+        git push origin "$stable_branch"
+        
+        # Продолжаем с merge веткой
+        subsection "Работа с merge веткой"
+        checkout_or_create_branch "$merge_branch" "$target_branch"
+        
+        if ! git merge "$stable_branch" --no-edit; then
+            warning "Конфликт при merge"
+            save_state "merge_in_progress" "true"
+            return 1
+        fi
+        
+        git push origin "$merge_branch"
+        
+    elif [[ "$(load_state merge_in_progress)" == "true" ]]; then
+        if [[ "$current" != "$merge_branch" ]]; then
+            error "Ожидается нахождение в ветке $merge_branch"
+            return 1
+        fi
+        
+        # Проверяем статус merge
+        if git merge --continue 2>/dev/null || git commit --no-edit 2>/dev/null; then
+            success "Merge завершен"
+        fi
+        
+        # Push merge ветки
+        info "Отправка merge ветки"
+        git push origin "$merge_branch"
+    fi
+    
+    # Возвращаемся на исходную ветку
+    git checkout "$current_branch"
+    
+    # Очищаем состояние
+    clear_state
+    
+    section "ЗАВЕРШЕНО"
+    success "Доставка успешно завершена!"
+    echo ""
+    info "Merge ветка для PR: $merge_branch -> $target_branch"
+}
+
+# ==============================================
+# Функции для HotFix
+# ==============================================
+
+# Функция для создания hotfix
+create_hotfix() {
+    section "СОЗДАНИЕ HOTFIX"
+    
+    # Выбираем тип версионной ветки
+    subsection "Выбор версионной ветки"
+    echo "1) PE (versions/pe/XX.XX.XX.X)"
+    echo "2) OE (versions/oe/XX.XX.XX.X)"
+    echo "3) IZ (versions/iz/XX.XX.XX.X)"
+    read -p "Выберите тип [1-3]: " version_type
+    
+    local version_prefix
+    case $version_type in
+        1) version_prefix="pe" ;;
+        2) version_prefix="oe" ;;
+        3) version_prefix="iz" ;;
+        *) 
+            error "Неверный выбор"
+            return 1
+            ;;
+    esac
+    
+    # Получаем список версионных веток
+    subsection "Доступные версии"
+    git fetch origin
+    local versions=$(git branch -r | grep "origin/versions/$version_prefix/" | sed 's|origin/||' | sort -V)
+    
+    if [[ -z "$versions" ]]; then
+        error "Не найдено версионных веток для $version_prefix"
+        return 1
+    fi
+    
+    echo "$versions" | nl
+    read -p "Выберите версию: " version_num
+    local version_branch=$(echo "$versions" | sed -n "${version_num}p" | xargs)
+    
+    if [[ -z "$version_branch" ]]; then
+        error "Неверный выбор версии"
+        return 1
+    fi
+    
+    # Запрашиваем JIRA ticket
+    ask "Введите номер JIRA задачи:"
+    read -r jira_ticket
+    
+    local hotfix_branch="hotfixes/$version_prefix/$jira_ticket"
+    
+    info "Версионная ветка: $version_branch"
+    info "Hotfix ветка: $hotfix_branch"
+    
+    # Выбираем источник коммитов
+    subsection "Выбор источника коммитов"
+    echo "1) test"
+    echo "2) release_oe"
+    echo "3) release_pe"
+    echo "4) Текущая ветка"
+    read -p "Откуда взять коммиты? [1-4]: " source_choice
+    
+    local source_branch
+    case $source_choice in
+        1) source_branch="test" ;;
+        2) source_branch="release_oe" ;;
+        3) source_branch="release_pe" ;;
+        4) source_branch=$(get_current_branch) ;;
+        *) source_branch="test" ;;
+    esac
+    
+    # Обновляем source branch
+    if [[ "$source_branch" != $(get_current_branch) ]]; then
+        git fetch origin "$source_branch:$source_branch"
+    fi
+    
+    # Выбираем коммиты
+    local commits=$(select_commits "$source_branch")
+    if [[ -z "$commits" ]]; then
+        error "Коммиты не выбраны"
+        return 1
+    fi
+    
+    # Создаем hotfix ветку
+    subsection "Создание hotfix ветки"
+    checkout_or_create_branch "$hotfix_branch" "$version_branch"
+    
+    # Cherry-pick коммитов
+    subsection "Cherry-pick коммитов"
+    for commit in $commits; do
+        info "Перенос коммита $commit"
+        if ! git cherry-pick -m 1 "$commit" 2>/dev/null; then
+            warning "Конфликт при cherry-pick коммита $commit"
+            echo ""
+            error "ОБНАРУЖЕН КОНФЛИКТ!"
+            echo "1. Разрешите конфликт вручную"
+            echo "2. Выполните: git add <файлы>"
+            echo "3. Выполните: git cherry-pick --continue"
+            echo "4. Продолжите с push: git push origin $hotfix_branch"
+            return 1
+        fi
+    done
+    
+    # Push hotfix ветки
+    info "Отправка hotfix ветки"
+    git push origin "$hotfix_branch"
+    
+    section "ЗАВЕРШЕНО"
+    success "Hotfix успешно создан!"
+    echo ""
+    info "Hotfix ветка для PR: $hotfix_branch -> $version_branch"
+    echo ""
+    echo -e "${GREEN}Теперь создайте Pull Request:${NC}"
+    echo -e "${YELLOW}$hotfix_branch${NC} → ${YELLOW}$version_branch${NC}"
+}
+
+# ==============================================
+# Вспомогательные функции
+# ==============================================
+
+# Функция для анализа текущего состояния
+analyze_current_state() {
+    section "АНАЛИЗ СОСТОЯНИЯ"
+    
+    local current_branch=$(get_current_branch)
+    info "Текущая ветка: $current_branch"
+    
+    # Проверяем тип ветки
+    if parse_result=$(parse_feature_branch "$current_branch"); then
+        IFS=':' read -r parent_jira jira <<< "$parse_result"
+        success "Feature ветка"
+        info "  Parent JIRA: $parent_jira"
+        info "  JIRA: $jira"
+        
+        # Проверяем существование связанных веток
+        subsection "Связанные ветки"
+        
+        local stable_branch="tasks/$parent_jira/stable_$jira"
+        if branch_exists "$stable_branch" || remote_branch_exists "$stable_branch"; then
+            info "  ✓ Stable ветка существует: $stable_branch"
+        else
+            info "  ✗ Stable ветка не существует"
+        fi
+        
+        for target in test release_oe release_pe; do
+            local merge_branch="tasks/$parent_jira/${target}_$jira"
+            if remote_branch_exists "$merge_branch"; then
+                info "  ✓ PR существует: $merge_branch -> $target"
+            fi
+        done
+        
+    elif parse_result=$(parse_hotfix_branch "$current_branch"); then
+        IFS=':' read -r version_type jira <<< "$parse_result"
+        success "Hotfix ветка"
+        info "  Тип версии: $version_type"
+        info "  JIRA: $jira"
+        
+    else
+        case "$current_branch" in
+            master|test|release_oe|release_pe)
+                warning "Находитесь в основной ветке: $current_branch"
+                ;;
+            versions/*)
+                warning "Находитесь в версионной ветке: $current_branch"
+                ;;
+            *)
+                warning "Неизвестный тип ветки"
+                ;;
+        esac
+    fi
+    
+    # Проверяем незафиксированные изменения
+    subsection "Статус рабочей директории"
+    if [[ -n "$(git status --porcelain)" ]]; then
+        warning "Есть незафиксированные изменения:"
+        git status --short
+    else
+        success "Рабочая директория чистая"
+    fi
+    
+    # Проверяем наличие сохраненного состояния
+    if [[ -f "$STATE_FILE" ]]; then
+        subsection "Сохраненное состояние"
+        warning "Обнаружено незавершенное действие:"
+        cat "$STATE_FILE" | while IFS='=' read -r key value; do
+            echo "  $key: $value"
+        done
+        echo ""
+        ask "Используйте 'git-flow-helper --continue' для продолжения"
+    fi
+}
+
+# Функция для создания новой feature ветки
+create_feature() {
+    section "СОЗДАНИЕ FEATURE ВЕТКИ"
+    
+    ask "Введите Parent JIRA:"
+    read -r parent_jira
+    
+    ask "Введите JIRA задачи:"
+    read -r jira
+    
+    local feature_branch="tasks/$parent_jira/$jira"
+    
+    info "Будет создана ветка: $feature_branch"
+    
+    ask "Продолжить? (y/n)"
+    read -n 1 -r
+    echo
+    
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        error "Отменено пользователем"
+        return 1
+    fi
+    
+    # Обновляем test ветку и создаем от нее feature
+    git fetch origin test:test
+    git checkout -b "$feature_branch" test
+    
+    success "Feature ветка создана: $feature_branch"
+}
+
+# Функция для очистки веток
+cleanup_branches() {
+    section "ОЧИСТКА ВЕТОК"
+    
+    warning "Эта операция удалит локальные ветки, которые уже влиты"
+    ask "Продолжить? (y/n)"
+    read -n 1 -r
+    echo
+    
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        info "Отменено"
+        return 0
+    fi
+    
+    # Получаем список merged веток
+    local merged_branches=$(git branch --merged | grep -E "tasks/|hotfixes/" | grep -v '\*')
+    
+    if [[ -z "$merged_branches" ]]; then
+        info "Нет веток для удаления"
+        return 0
+    fi
+    
+    echo "Будут удалены следующие ветки:"
+    echo "$merged_branches"
+    echo ""
+    
+    ask "Удалить эти ветки? (y/n)"
+    read -n 1 -r
+    echo
+    
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        echo "$merged_branches" | xargs -r git branch -d
+        success "Ветки удалены"
+    fi
+}
+
+# ==============================================
+# Интерактивное меню
+# ==============================================
+
+show_menu() {
+    local current_branch=$(get_current_branch)
+    
+    clear
+    echo -e "${CYAN}${BOLD}"
+    echo "╔══════════════════════════════════════════════╗"
+    echo "║         Git Flow Helper - v2.0               ║"
+    echo "╚══════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    
+    echo -e "${YELLOW}Текущая ветка:${NC} $current_branch"
+    echo ""
+    
+    # Проверяем наличие сохраненного состояния
+    if [[ -f "$STATE_FILE" ]]; then
+        echo -e "${RED}${BOLD}⚠ Обнаружено незавершенное действие${NC}"
+        echo -e "${YELLOW}c)${NC} Продолжить доставку"
+        echo ""
+    fi
+    
+    # Определяем доступные действия на основе текущей ветки
+    if parse_feature_branch "$current_branch" >/dev/null 2>&1; then
+        echo -e "${GREEN}=== Feature ветка ===${NC}"
+        echo -e "${YELLOW}1)${NC} Доставить изменения (deliver)"
+        echo -e "${YELLOW}2)${NC} Обновить существующий PR"
+        echo ""
+    fi
+    
+    echo -e "${CYAN}=== Общие действия ===${NC}"
+    echo -e "${YELLOW}3)${NC} Создать новую feature ветку"
+    echo -e "${YELLOW}4)${NC} Создать hotfix"
+    echo -e "${YELLOW}5)${NC} Анализ текущего состояния"
+    echo -e "${YELLOW}6)${NC} Очистка влитых веток"
+    echo ""
+    echo -e "${YELLOW}h)${NC} Помощь"
+    echo -e "${YELLOW}q)${NC} Выход"
+    echo ""
+}
+
+show_help() {
+    section "ПОМОЩЬ"
+    
+    echo -e "${CYAN}Основные команды:${NC}"
+    echo "  git-flow-helper          - Интерактивное меню"
+    echo "  git-flow-helper deliver  - Быстрая доставка из feature ветки"
+    echo "  git-flow-helper hotfix   - Быстрое создание hotfix"
+    echo "  git-flow-helper continue - Продолжить после разрешения конфликтов"
+    echo "  git-flow-helper status   - Анализ текущего состояния"
+    echo "  git-flow-helper help     - Показать эту справку"
+    echo ""
+    
+    echo -e "${CYAN}GitFlow процесс:${NC}"
+    echo "1. Feature разработка:"
+    echo "   - Создание: tasks/PARENT_JIRA/JIRA от test"
+    echo "   - Стабилизация: tasks/PARENT_JIRA/stable_JIRA от master"
+    echo "   - Merge: tasks/PARENT_JIRA/{test|release_oe|release_pe}_JIRA"
+    echo ""
+    echo "2. Hotfix процесс:"
+    echo "   - Версионные ветки: versions/{pe|oe|iz}/XX.XX.XX.X"
+    echo "   - Hotfix ветки: hotfixes/{pe|oe|iz}/JIRA"
+    echo ""
+    
+    echo -e "${CYAN}Работа с конфликтами:${NC}"
+    echo "1. При возникновении конфликта скрипт сохраняет состояние"
+    echo "2. Разрешите конфликты вручную"
+    echo "3. Выполните git add для файлов с разрешенными конфликтами"
+    echo "4. Запустите: git-flow-helper --continue"
+    echo ""
+}
+
+# ==============================================
+# Главная функция
+# ==============================================
+
+main() {
+    check_git_repo
+    
+    # Обработка аргументов командной строки
+    case "${1:-}" in
+        --continue|continue|-c)
+            continue_delivery
+            exit $?
+            ;;
+        deliver|--deliver|-d)
+            deliver_feature
+            exit $?
+            ;;
+        hotfix|--hotfix|-h)
+            create_hotfix
+            exit $?
+            ;;
+        status|--status|-s)
+            analyze_current_state
+            exit $?
+            ;;
+        help|--help|-h)
+            show_help
+            exit 0
+            ;;
+        cleanup|--cleanup)
+            cleanup_branches
+            exit $?
+            ;;
+        "")
+            # Интерактивный режим
+            while true; do
+                show_menu
+                read -p "Выберите действие: " -n 1 choice
+                echo ""
+                
+                case $choice in
+                    c|C)
+                        if [[ -f "$STATE_FILE" ]]; then
+                            continue_delivery
+                            read -p "Нажмите Enter для продолжения..."
+                        else
+                            error "Нет сохраненного состояния"
+                            sleep 2
+                        fi
+                        ;;
+                    1)
+                        if parse_feature_branch "$(get_current_branch)" >/dev/null 2>&1; then
+                            deliver_feature
+                            read -p "Нажмите Enter для продолжения..."
+                        else
+                            error "Недоступно в текущей ветке"
+                            sleep 2
+                        fi
+                        ;;
+                    2)
+                        if parse_feature_branch "$(get_current_branch)" >/dev/null 2>&1; then
+                            update_pr
+                            read -p "Нажмите Enter для продолжения..."
+                        else
+                            error "Недоступно в текущей ветке"
+                            sleep 2
+                        fi
+                        ;;
+                    3)
+                        create_feature
+                        read -p "Нажмите Enter для продолжения..."
+                        ;;
+                    4)
+                        create_hotfix
+                        read -p "Нажмите Enter для продолжения..."
+                        ;;
+                    5)
+                        analyze_current_state
+                        read -p "Нажмите Enter для продолжения..."
+                        ;;
+                    6)
+                        cleanup_branches
+                        read -p "Нажмите Enter для продолжения..."
+                        ;;
+                    h|H)
+                        show_help
+                        read -p "Нажмите Enter для продолжения..."
+                        ;;
+                    q|Q)
+                        echo "До свидания!"
+                        exit 0
+                        ;;
+                    *)
+                        error "Неверный выбор"
+                        sleep 1
+                        ;;
+                esac
+            done
+            ;;
+        *)
+            error "Неизвестная команда: $1"
+            echo "Используйте 'git-flow-helper help' для справки"
+            exit 1
+            ;;
+    esac
+}
+
+# Запуск
+main "$@"
