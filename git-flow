@@ -1,0 +1,259 @@
+#!/bin/bash
+
+# ==============================================
+# git-flow - главное меню GitFlow плагина
+# Автор: Сабиров Савелий Русланович
+# Версия: 2.0
+# ==============================================
+
+# Загружаем общие функции
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/git-flow-common"
+
+# Функция отображения меню
+show_menu() {
+    local current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+    
+    clear
+    echo -e "${CYAN}╔════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${NC}          ${MAGENTA}GitFlow Automation Tool v2.0${NC}              ${CYAN}║${NC}"
+    echo -e "${CYAN}╚════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    echo -e "${BLUE}Текущая ветка:${NC} ${GREEN}$current_branch${NC}"
+    echo ""
+    
+    # Определяем доступные действия на основе текущей ветки
+    local available_actions=()
+    
+    if parse_feature_branch "$current_branch"; then
+        available_actions+=("deliver")
+    fi
+    
+    if parse_hotfix_branch "$current_branch"; then
+        available_actions+=("hotfix-push")
+    fi
+    
+    # Проверяем наличие сохраненного состояния
+    if [[ -f "$STATE_FILE" ]]; then
+        available_actions+=("continue")
+    fi
+    
+    # Всегда доступные действия
+    available_actions+=("new-delivery" "new-hotfix" "status" "help" "exit")
+    
+    echo -e "${CYAN}Доступные команды:${NC}"
+    echo ""
+    
+    local index=1
+    for action in "${available_actions[@]}"; do
+        case $action in
+            deliver)
+                echo -e "  ${GREEN}$index)${NC} Начать доставку изменений (Deliver)"
+                ;;
+            hotfix-push)
+                echo -e "  ${GREEN}$index)${NC} Завершить и отправить hotfix"
+                ;;
+            continue)
+                echo -e "  ${YELLOW}$index)${NC} Продолжить после разрешения конфликтов"
+                ;;
+            new-delivery)
+                echo -e "  ${GREEN}$index)${NC} Создать новую задачу (Feature Branch)"
+                ;;
+            new-hotfix)
+                echo -e "  ${GREEN}$index)${NC} Создать новый hotfix"
+                ;;
+            status)
+                echo -e "  ${BLUE}$index)${NC} Показать статус текущей операции"
+                ;;
+            help)
+                echo -e "  ${BLUE}$index)${NC} Справка"
+                ;;
+            exit)
+                echo -e "  ${RED}$index)${NC} Выход"
+                ;;
+        esac
+        ((index++))
+    done
+    
+    echo ""
+    echo -ne "${CYAN}Выберите действие [1-${#available_actions[@]}]:${NC} "
+    
+    read -r choice
+    
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le "${#available_actions[@]}" ]; then
+        local selected_action="${available_actions[$((choice-1))]}"
+        execute_action "$selected_action"
+    else
+        error "Неверный выбор"
+        sleep 2
+        show_menu
+    fi
+}
+
+# Функция выполнения выбранного действия
+execute_action() {
+    local action=$1
+    
+    case $action in
+        deliver)
+            "$SCRIPT_DIR/git-flow-deliver"
+            ;;
+        hotfix-push)
+            "$SCRIPT_DIR/git-flow-hotfix" push
+            ;;
+        continue)
+            "$SCRIPT_DIR/git-flow-continue"
+            ;;
+        new-delivery)
+            create_feature_branch
+            ;;
+        new-hotfix)
+            "$SCRIPT_DIR/git-flow-hotfix" create
+            ;;
+        status)
+            show_status
+            ;;
+        help)
+            show_help
+            ;;
+        exit)
+            echo -e "${GREEN}До свидания!${NC}"
+            exit 0
+            ;;
+    esac
+    
+    # После выполнения действия, возвращаемся в меню
+    if [[ "$action" != "exit" ]]; then
+        echo ""
+        read -p "Нажмите Enter для возврата в меню..." -r
+        show_menu
+    fi
+}
+
+# Функция создания новой feature ветки
+create_feature_branch() {
+    section "СОЗДАНИЕ НОВОЙ FEATURE ВЕТКИ"
+    
+    echo "Введите PARENT_JIRA (например, PROJ-123):"
+    read -r parent_jira
+    
+    echo "Введите JIRA задачи (например, TASK-456):"
+    read -r jira
+    
+    local feature_branch="tasks/$parent_jira/$jira"
+    
+    info "Создается ветка: $feature_branch от test"
+    
+    git fetch origin test:test
+    git checkout -b "$feature_branch" test
+    
+    success "Ветка $feature_branch создана и активирована"
+}
+
+# Функция отображения статуса
+show_status() {
+    section "СТАТУС ТЕКУЩЕЙ ОПЕРАЦИИ"
+    
+    if load_state; then
+        info "Обнаружена незавершенная операция:"
+        echo ""
+        echo "  Операция: $OPERATION"
+        echo "  Исходная ветка: $ORIGINAL_BRANCH"
+        echo "  PARENT_JIRA: $PARENT_JIRA"
+        echo "  JIRA: $JIRA"
+        
+        if [[ -n "$TARGET_ENV" ]]; then
+            echo "  Целевое окружение: $TARGET_ENV"
+        fi
+        
+        if [[ -n "$COMMITS" ]]; then
+            echo "  Коммиты: ${COMMITS[@]}"
+        fi
+        
+        echo ""
+        
+        if check_conflicts; then
+            warning "Есть неразрешенные конфликты"
+            show_conflict_status
+        else
+            success "Конфликты отсутствуют, можно продолжить"
+        fi
+    else
+        success "Нет незавершенных операций"
+    fi
+}
+
+# Функция отображения справки
+show_help() {
+    section "СПРАВКА"
+    
+    echo "GitFlow Automation Tool - плагин для автоматизации работы с GitFlow"
+    echo ""
+    echo "СТРУКТУРА ВЕТОК:"
+    echo "  master           - ветка стабилизации"
+    echo "  test             - ветка разработки"
+    echo "  release_oe       - опытная эксплуатация"
+    echo "  release_pe       - промышленная эксплуатация"
+    echo ""
+    echo "FEATURE ВЕТКИ:"
+    echo "  tasks/PARENT_JIRA/JIRA              - основная ветка разработки"
+    echo "  tasks/PARENT_JIRA/stable_JIRA       - ветка стабилизации"
+    echo "  tasks/PARENT_JIRA/test_JIRA         - ветка для PR в test"
+    echo "  tasks/PARENT_JIRA/release_oe_JIRA   - ветка для PR в release_oe"
+    echo "  tasks/PARENT_JIRA/release_pe_JIRA   - ветка для PR в release_pe"
+    echo ""
+    echo "HOTFIX ВЕТКИ:"
+    echo "  hotfixes/pe/JIRA - hotfix для PE"
+    echo "  hotfixes/oe/JIRA - hotfix для OE"
+    echo "  hotfixes/iz/JIRA - hotfix для IZ"
+    echo ""
+    echo "ВЕРСИОННЫЕ ВЕТКИ:"
+    echo "  versions/pe/00.00.00.0"
+    echo "  versions/oe/00.00.00.0"
+    echo "  versions/iz/00.00.00.0"
+    echo ""
+    echo "КОМАНДЫ:"
+    echo "  git flow         - открыть интерактивное меню (этот экран)"
+    echo "  git flow deliver - начать доставку изменений"
+    echo "  git flow hotfix  - работа с hotfix"
+    echo "  git flow continue - продолжить после конфликтов"
+    echo ""
+    echo "Подробная документация в README.md"
+}
+
+# Главная функция
+main() {
+    # Проверка, что мы в git репозитории
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        error "Это не git репозиторий!"
+        exit 1
+    fi
+    
+    # Если переданы аргументы, выполняем напрямую
+    if [[ $# -gt 0 ]]; then
+        case $1 in
+            deliver)
+                "$SCRIPT_DIR/git-flow-deliver" "${@:2}"
+                ;;
+            hotfix)
+                "$SCRIPT_DIR/git-flow-hotfix" "${@:2}"
+                ;;
+            continue)
+                "$SCRIPT_DIR/git-flow-continue"
+                ;;
+            help|--help|-h)
+                show_help
+                ;;
+            *)
+                error "Неизвестная команда: $1"
+                echo "Используйте 'git flow help' для справки"
+                exit 1
+                ;;
+        esac
+    else
+        # Показываем интерактивное меню
+        show_menu
+    fi
+}
+
+main "$@"

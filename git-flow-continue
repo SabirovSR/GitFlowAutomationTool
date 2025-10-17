@@ -1,0 +1,323 @@
+#!/bin/bash
+
+# ==============================================
+# git-flow-continue - продолжение после конфликтов
+# Автор: Сабиров Савелий Русланович
+# Версия: 2.0
+# ==============================================
+
+# Загружаем общие функции
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/git-flow-common"
+
+# Функция продолжения stable cherry-pick
+continue_stable_cherry_pick() {
+    section "ПРОДОЛЖЕНИЕ CHERRY-PICK В STABLE ВЕТКУ"
+    
+    # Проверяем, что конфликты разрешены
+    if check_conflicts; then
+        error "Конфликты еще не разрешены!"
+        show_conflict_status
+        exit 1
+    fi
+    
+    # Проверяем, что изменения добавлены
+    if git diff --cached --quiet; then
+        warning "Нет staged изменений"
+        echo "Добавьте разрешенные файлы через: git add <файлы>"
+        exit 1
+    fi
+    
+    # Продолжаем cherry-pick
+    info "Завершение cherry-pick..."
+    git cherry-pick --continue
+    
+    success "Cherry-pick завершен"
+    
+    # Если остались коммиты для переноса
+    if [[ -n "$COMMITS" ]]; then
+        info "Продолжение переноса оставшихся коммитов..."
+        
+        for commit in $COMMITS; do
+            info "Перенос коммита: $(git log --oneline -1 $commit)"
+            
+            if ! git cherry-pick "$commit"; then
+                if check_conflicts; then
+                    # Сохраняем состояние с оставшимися коммитами
+                    local remaining_commits=()
+                    local found=false
+                    for c in $COMMITS; do
+                        if [[ "$c" == "$commit" ]]; then
+                            found=true
+                            continue
+                        fi
+                        if [[ "$found" == true ]]; then
+                            remaining_commits+=("$c")
+                        fi
+                    done
+                    
+                    save_state "stable-cherry-pick" "$ORIGINAL_BRANCH" "${remaining_commits[@]}"
+                    show_conflict_status
+                    exit 1
+                fi
+            fi
+        done
+    fi
+    
+    success "Все коммиты успешно перенесены"
+    
+    # Спрашиваем про squash
+    echo ""
+    echo "Хотите объединить все коммиты в один (squash)? (рекомендуется)"
+    read -p "[Y/n]: " -n 1 -r
+    echo
+    
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        squash_commits
+    fi
+    
+    # Push stable ветки
+    STABLE_BRANCH="tasks/$PARENT_JIRA/stable_$JIRA"
+    safe_push "$STABLE_BRANCH" false
+    success "Stable ветка отправлена в удаленный репозиторий"
+    
+    # Переходим к созданию merge ветки
+    proceed_to_merge_branch
+}
+
+# Функция squash коммитов (копия из deliver)
+squash_commits() {
+    info "Объединение коммитов..."
+    
+    local base_commit=$(git merge-base HEAD master)
+    local commit_count=$(git rev-list --count ${base_commit}..HEAD)
+    
+    if [[ $commit_count -le 1 ]]; then
+        warning "Недостаточно коммитов для squash (найдено: $commit_count)"
+        return
+    fi
+    
+    info "Найдено $commit_count коммитов для объединения"
+    
+    echo ""
+    echo "Введите сообщение для объединенного коммита:"
+    echo "(оставьте пустым для автогенерации)"
+    read -r squash_message
+    
+    if [[ -z "$squash_message" ]]; then
+        squash_message="[$PARENT_JIRA][$JIRA] Доставка изменений"
+    fi
+    
+    git reset --soft "$base_commit"
+    git commit -m "$squash_message"
+    
+    success "Коммиты объединены"
+}
+
+# Функция перехода к merge ветке
+proceed_to_merge_branch() {
+    section "СОЗДАНИЕ MERGE ВЕТКИ"
+    
+    # Определяем merge ветку
+    local merge_branch
+    case $TARGET_ENV in
+        release_oe)
+            merge_branch="tasks/$PARENT_JIRA/release_oe_$JIRA"
+            ;;
+        release_pe)
+            merge_branch="tasks/$PARENT_JIRA/release_pe_$JIRA"
+            ;;
+        *)
+            merge_branch="tasks/$PARENT_JIRA/test_$JIRA"
+            TARGET_ENV="test"
+            ;;
+    esac
+    
+    # Создаем или обновляем merge ветку
+    create_or_update_branch "$merge_branch" "$TARGET_ENV"
+    
+    # Проверяем, нужно ли обновить PR
+    local force_push=false
+    
+    if git ls-remote --exit-code --heads origin "$merge_branch" >/dev/null 2>&1; then
+        echo ""
+        warning "Ветка $merge_branch уже существует в удаленном репозитории"
+        echo "Пересоздать ветку для обновления PR? (рекомендуется)"
+        read -p "[Y/n]: " -n 1 -r
+        echo
+        
+        if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+            git checkout "$TARGET_ENV"
+            git branch -D "$merge_branch"
+            git checkout -b "$merge_branch" "$TARGET_ENV"
+            force_push=true
+        fi
+    fi
+    
+    # Merge stable ветки
+    section "СЛИЯНИЕ STABLE ВЕТКИ"
+    
+    STABLE_BRANCH="tasks/$PARENT_JIRA/stable_$JIRA"
+    info "Выполняется merge: $STABLE_BRANCH -> $merge_branch"
+    
+    if ! git merge "$STABLE_BRANCH" --no-ff -m "Merge $STABLE_BRANCH into $merge_branch"; then
+        if check_conflicts; then
+            # Обновляем состояние
+            cat > "$STATE_FILE" <<EOF
+OPERATION=merge-to-$TARGET_ENV
+ORIGINAL_BRANCH=$ORIGINAL_BRANCH
+PARENT_JIRA=$PARENT_JIRA
+JIRA=$JIRA
+TARGET_ENV=$TARGET_ENV
+MERGE_BRANCH=$merge_branch
+FORCE_PUSH=$force_push
+EOF
+            show_conflict_status
+            exit 1
+        fi
+    fi
+    
+    success "Слияние выполнено успешно"
+    
+    # Push merge ветки
+    safe_push "$merge_branch" "$force_push"
+    success "Изменения отправлены в $merge_branch"
+    
+    # Возврат на исходную ветку
+    if [[ -n "$ORIGINAL_BRANCH" ]]; then
+        git checkout "$ORIGINAL_BRANCH"
+        success "Возвращены на ветку: $ORIGINAL_BRANCH"
+    fi
+    
+    # Очистка состояния
+    clear_state
+    
+    # Вывод итогов
+    show_summary "$merge_branch"
+}
+
+# Функция продолжения merge в целевую ветку
+continue_merge_to_env() {
+    section "ПРОДОЛЖЕНИЕ MERGE В $TARGET_ENV"
+    
+    # Проверяем конфликты
+    if check_conflicts; then
+        error "Конфликты еще не разрешены!"
+        show_conflict_status
+        exit 1
+    fi
+    
+    # Проверяем staged изменения
+    if git diff --cached --quiet; then
+        warning "Нет staged изменений"
+        echo "Добавьте разрешенные файлы через: git add <файлы>"
+        exit 1
+    fi
+    
+    # Продолжаем merge
+    info "Завершение merge..."
+    git commit --no-edit
+    
+    success "Merge завершен"
+    
+    # Определяем merge ветку из состояния или контекста
+    local merge_branch="${MERGE_BRANCH}"
+    if [[ -z "$merge_branch" ]]; then
+        case $TARGET_ENV in
+            release_oe)
+                merge_branch="tasks/$PARENT_JIRA/release_oe_$JIRA"
+                ;;
+            release_pe)
+                merge_branch="tasks/$PARENT_JIRA/release_pe_$JIRA"
+                ;;
+            *)
+                merge_branch="tasks/$PARENT_JIRA/test_$JIRA"
+                ;;
+        esac
+    fi
+    
+    # Push merge ветки
+    local force_push="${FORCE_PUSH:-false}"
+    safe_push "$merge_branch" "$force_push"
+    success "Изменения отправлены в $merge_branch"
+    
+    # Возврат на исходную ветку
+    if [[ -n "$ORIGINAL_BRANCH" ]]; then
+        git checkout "$ORIGINAL_BRANCH"
+        success "Возвращены на ветку: $ORIGINAL_BRANCH"
+    fi
+    
+    # Очистка состояния
+    clear_state
+    
+    # Вывод итогов
+    show_summary "$merge_branch"
+}
+
+# Функция продолжения hotfix cherry-pick
+continue_hotfix_cherry_pick() {
+    section "ПРОДОЛЖЕНИЕ HOTFIX CHERRY-PICK"
+    
+    # Проверяем конфликты
+    if check_conflicts; then
+        error "Конфликты еще не разрешены!"
+        show_conflict_status
+        exit 1
+    fi
+    
+    # Проверяем staged изменения
+    if git diff --cached --quiet; then
+        warning "Нет staged изменений"
+        echo "Добавьте разрешенные файлы через: git add <файлы>"
+        exit 1
+    fi
+    
+    # Продолжаем cherry-pick
+    info "Завершение cherry-pick..."
+    git cherry-pick --continue
+    
+    success "Cherry-pick завершен"
+    
+    # Push ветки
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    safe_push "$CURRENT_BRANCH" false
+    
+    success "Hotfix ветка отправлена в удаленный репозиторий"
+    info "Создайте или обновите Pull Request"
+    
+    # Очистка состояния
+    clear_state
+}
+
+# Главная функция
+main() {
+    section "ПРОДОЛЖЕНИЕ ОПЕРАЦИИ ПОСЛЕ КОНФЛИКТОВ"
+    
+    # Загружаем состояние
+    if ! load_state; then
+        error "Не найдено сохраненного состояния"
+        info "Используйте эту команду только после конфликтов в git flow deliver или git flow hotfix"
+        exit 1
+    fi
+    
+    info "Обнаружена операция: $OPERATION"
+    
+    # Выполняем соответствующее действие
+    case $OPERATION in
+        stable-cherry-pick)
+            continue_stable_cherry_pick
+            ;;
+        merge-to-*)
+            continue_merge_to_env
+            ;;
+        hotfix-cherry-pick)
+            continue_hotfix_cherry_pick
+            ;;
+        *)
+            error "Неизвестная операция: $OPERATION"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

@@ -1,0 +1,226 @@
+#!/bin/bash
+
+# ==============================================
+# git-flow-deliver - автоматизация доставки изменений
+# Автор: Сабиров Савелий Русланович
+# Версия: 2.0
+# ==============================================
+
+# Загружаем общие функции
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/git-flow-common"
+
+# Функция выбора целевого окружения
+select_target_environment() {
+    section "ВЫБОР ЦЕЛЕВОГО ОКРУЖЕНИЯ"
+    
+    echo "Куда нужно довести изменения?"
+    echo "  1) test (по умолчанию)"
+    echo "  2) release_oe"
+    echo "  3) release_pe"
+    echo ""
+    echo -ne "Выберите [1-3] (Enter = test): "
+    read -r env_choice
+    
+    case $env_choice in
+        2)
+            TARGET_ENV="release_oe"
+            MERGE_BRANCH="$RELEASE_OE_BRANCH"
+            ;;
+        3)
+            TARGET_ENV="release_pe"
+            MERGE_BRANCH="$RELEASE_PE_BRANCH"
+            ;;
+        1|"")
+            TARGET_ENV="test"
+            MERGE_BRANCH="$TEST_BRANCH"
+            ;;
+        *)
+            error "Неверный выбор"
+            exit 1
+            ;;
+    esac
+    
+    success "Выбрано окружение: $TARGET_ENV"
+    info "Ветка для PR: $MERGE_BRANCH"
+}
+
+# Функция обработки stable ветки
+process_stable_branch() {
+    section "STABLE ВЕТКА"
+    
+    create_or_update_branch "$STABLE_BRANCH" "master"
+    
+    # Cherry-pick коммитов
+    section "CHERRY-PICK ИЗМЕНЕНИЙ"
+    
+    local commit_index=0
+    for commit in "${COMMITS[@]}"; do
+        ((commit_index++))
+        info "Перенос коммита $commit_index/${#COMMITS[@]}: $(git log --oneline -1 $commit)"
+        
+        if ! git cherry-pick "$commit"; then
+            if check_conflicts; then
+                save_state "stable-cherry-pick" "$ORIGINAL_BRANCH" "${COMMITS[@]:$commit_index}"
+                show_conflict_status
+                exit 1
+            else
+                # Cherry-pick прошел успешно, но возможно были изменения
+                git cherry-pick --continue 2>/dev/null || true
+            fi
+        fi
+    done
+    
+    success "Все коммиты успешно перенесены в stable ветку"
+    
+    # Спрашиваем про squash
+    echo ""
+    echo "Хотите объединить все коммиты в один (squash)? (рекомендуется)"
+    read -p "[Y/n]: " -n 1 -r
+    echo
+    
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        squash_commits
+    fi
+    
+    # Push stable ветки
+    safe_push "$STABLE_BRANCH" false
+    success "Stable ветка отправлена в удаленный репозиторий"
+}
+
+# Функция squash коммитов
+squash_commits() {
+    info "Объединение коммитов..."
+    
+    # Находим базовый коммит (общий предок с master)
+    local base_commit=$(git merge-base HEAD master)
+    
+    # Считаем количество коммитов
+    local commit_count=$(git rev-list --count ${base_commit}..HEAD)
+    
+    if [[ $commit_count -le 1 ]]; then
+        warning "Недостаточно коммитов для squash (найдено: $commit_count)"
+        return
+    fi
+    
+    info "Найдено $commit_count коммитов для объединения"
+    
+    # Получаем сообщение для squash коммита
+    echo ""
+    echo "Введите сообщение для объединенного коммита:"
+    echo "(оставьте пустым для автогенерации)"
+    read -r squash_message
+    
+    if [[ -z "$squash_message" ]]; then
+        squash_message="[$PARENT_JIRA][$JIRA] Доставка изменений"
+    fi
+    
+    # Выполняем squash через reset и commit
+    git reset --soft "$base_commit"
+    git commit -m "$squash_message"
+    
+    success "Коммиты объединены"
+}
+
+# Функция обработки merge ветки
+process_merge_branch() {
+    section "MERGE ВЕТКА ($TARGET_ENV)"
+    
+    create_or_update_branch "$MERGE_BRANCH" "$TARGET_ENV"
+    
+    # Проверяем, нужно ли обновить PR или создать новый
+    local force_push=false
+    
+    if git ls-remote --exit-code --heads origin "$MERGE_BRANCH" >/dev/null 2>&1; then
+        echo ""
+        warning "Ветка $MERGE_BRANCH уже существует в удаленном репозитории"
+        echo "Это означает, что PR уже создан."
+        echo ""
+        echo "Выберите действие:"
+        echo "  1) Обновить PR (пересоздать ветку с актуальной $TARGET_ENV)"
+        echo "  2) Продолжить с текущей веткой (добавить изменения)"
+        echo ""
+        read -p "Ваш выбор [1-2]: " -r update_choice
+        
+        if [[ "$update_choice" == "1" ]]; then
+            info "Пересоздание ветки для обновления PR..."
+            git checkout "$TARGET_ENV"
+            git branch -D "$MERGE_BRANCH"
+            git checkout -b "$MERGE_BRANCH" "$TARGET_ENV"
+            force_push=true
+        fi
+    fi
+    
+    # Merge stable ветки
+    section "СЛИЯНИЕ STABLE ВЕТКИ"
+    
+    info "Выполняется merge: $STABLE_BRANCH -> $MERGE_BRANCH"
+    
+    if ! git merge "$STABLE_BRANCH" --no-ff -m "Merge $STABLE_BRANCH into $MERGE_BRANCH"; then
+        if check_conflicts; then
+            save_state "merge-to-$TARGET_ENV" "$ORIGINAL_BRANCH"
+            show_conflict_status
+            exit 1
+        fi
+    fi
+    
+    success "Слияние выполнено успешно"
+    
+    # Push merge ветки
+    safe_push "$MERGE_BRANCH" "$force_push"
+    success "Изменения отправлены в $MERGE_BRANCH"
+}
+
+# Главная функция
+main() {
+    section "АВТОМАТИЗАЦИЯ ДОСТАВКИ ИЗМЕНЕНИЙ"
+    
+    # Проверка изменений
+    check_changes
+    
+    # Парсинг текущей ветки
+    section "ПАРСИНГ ВЕТКИ"
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    
+    if ! parse_feature_branch "$CURRENT_BRANCH"; then
+        error "Вы не в feature-ветке!"
+        info "Ожидается формат: tasks/PARENT_JIRA/JIRA"
+        info "Текущая ветка: $CURRENT_BRANCH"
+        exit 1
+    fi
+    
+    success "Текущая ветка: $CURRENT_BRANCH"
+    info "PARENT_JIRA: $PARENT_JIRA"
+    info "JIRA: $JIRA"
+    
+    # Сохраняем исходную ветку
+    ORIGINAL_BRANCH="$CURRENT_BRANCH"
+    
+    # Получаем имена веток
+    get_branch_names
+    
+    # Выбор коммитов для переноса
+    select_commits "$CURRENT_BRANCH"
+    
+    # Выбор целевого окружения
+    select_target_environment
+    
+    # Обработка stable ветки
+    process_stable_branch
+    
+    # Обработка merge ветки
+    process_merge_branch
+    
+    # Возвращаемся на исходную ветку
+    section "ВОЗВРАТ НА ИСХОДНУЮ ВЕТКУ"
+    git checkout "$ORIGINAL_BRANCH"
+    success "Возвращены на ветку: $ORIGINAL_BRANCH"
+    
+    # Очистка состояния
+    clear_state
+    
+    # Вывод итогов
+    show_summary "$MERGE_BRANCH"
+}
+
+main "$@"

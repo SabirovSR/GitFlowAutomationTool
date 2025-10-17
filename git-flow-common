@@ -1,0 +1,291 @@
+#!/bin/bash
+
+# ==============================================
+# git-flow-common - общие функции и константы
+# Автор: Сабиров Савелий Русланович
+# Версия: 2.0
+# ==============================================
+
+# Цвета для сообщений
+export RED='\033[0;31m'
+export GREEN='\033[0;32m'
+export YELLOW='\033[0;33m'
+export BLUE='\033[0;34m'
+export CYAN='\033[0;36m'
+export MAGENTA='\033[0;35m'
+export NC='\033[0m' # No Color
+
+# Файл состояния для продолжения после конфликтов
+export STATE_FILE=".git/git-flow-state"
+
+# Функция для вывода заголовков
+section() {
+    echo -e "\n${CYAN}=== $1 ===${NC}"
+}
+
+# Функция для вывода ошибок
+error() {
+    echo -e "${RED}ОШИБКА: $1${NC}"
+}
+
+# Функция для вывода предупреждений
+warning() {
+    echo -e "${YELLOW}ВНИМАНИЕ: $1${NC}"
+}
+
+# Функция для вывода успешных сообщений
+success() {
+    echo -e "${GREEN}✔ $1${NC}"
+}
+
+# Функция для вывода информации
+info() {
+    echo -e "${BLUE}ℹ $1${NC}"
+}
+
+# Функция фильтрации изменений
+filter_changes() {
+    git status --porcelain
+}
+
+# Функция проверки изменений
+check_changes() {
+    if [[ -n "$(filter_changes)" ]]; then
+        warning "Обнаружены следующие изменения:"
+        filter_changes
+        echo ""
+        read -p "Продолжить несмотря на изменения? (y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            error "Прервано пользователем"
+            exit 1
+        fi
+    else
+        success "Нет незафиксированных изменений"
+    fi
+}
+
+# Функция парсинга feature ветки
+parse_feature_branch() {
+    local branch=$1
+    if [[ ! "$branch" =~ ^tasks/([^/]+)/([^/]+)$ ]]; then
+        return 1
+    fi
+    
+    PARENT_JIRA="${BASH_REMATCH[1]}"
+    JIRA="${BASH_REMATCH[2]}"
+    
+    # Проверка на специальные префиксы
+    if [[ "$JIRA" =~ ^stable_ ]] || [[ "$JIRA" =~ ^test_ ]] || [[ "$JIRA" =~ ^release_oe_ ]] || [[ "$JIRA" =~ ^release_pe_ ]]; then
+        # Это служебная ветка, извлекаем настоящий JIRA
+        JIRA="${JIRA#stable_}"
+        JIRA="${JIRA#test_}"
+        JIRA="${JIRA#release_oe_}"
+        JIRA="${JIRA#release_pe_}"
+    fi
+    
+    return 0
+}
+
+# Функция парсинга hotfix ветки
+parse_hotfix_branch() {
+    local branch=$1
+    if [[ ! "$branch" =~ ^hotfixes/(pe|oe|iz)/([^/]+)$ ]]; then
+        return 1
+    fi
+    
+    HOTFIX_TYPE="${BASH_REMATCH[1]}"
+    JIRA="${BASH_REMATCH[2]}"
+    
+    return 0
+}
+
+# Функция получения имен веток
+get_branch_names() {
+    STABLE_BRANCH="tasks/$PARENT_JIRA/stable_$JIRA"
+    TEST_BRANCH="tasks/$PARENT_JIRA/test_$JIRA"
+    RELEASE_OE_BRANCH="tasks/$PARENT_JIRA/release_oe_$JIRA"
+    RELEASE_PE_BRANCH="tasks/$PARENT_JIRA/release_pe_$JIRA"
+}
+
+# Функция выбора количества коммитов
+select_commits() {
+    local current_branch=$1
+    
+    section "ВЫБОР КОММИТОВ"
+    
+    # Получаем общего предка с master
+    local base_commit=$(git merge-base HEAD master 2>/dev/null || echo "")
+    
+    if [[ -z "$base_commit" ]]; then
+        warning "Не удалось найти общего предка с master, показываем последние 20 коммитов"
+        git log --oneline -20
+    else
+        info "Коммиты в текущей ветке (с момента ответвления от master):"
+        git log --oneline "${base_commit}..HEAD"
+    fi
+    
+    echo ""
+    echo "Сколько последних коммитов нужно довести?"
+    echo "Введите число или 'all' для всех коммитов:"
+    read -r commit_count
+    
+    if [[ "$commit_count" == "all" ]]; then
+        if [[ -z "$base_commit" ]]; then
+            error "Невозможно определить все коммиты без общего предка"
+            exit 1
+        fi
+        # Получаем все коммиты от base до HEAD, исключая merge коммиты
+        COMMITS=($(git rev-list --no-merges --reverse "${base_commit}..HEAD"))
+    elif [[ "$commit_count" =~ ^[0-9]+$ ]]; then
+        # Получаем последние N коммитов, исключая merge коммиты
+        COMMITS=($(git rev-list --no-merges --max-count="$commit_count" HEAD | tac))
+    else
+        error "Неверный ввод"
+        exit 1
+    fi
+    
+    if [[ ${#COMMITS[@]} -eq 0 ]]; then
+        error "Не найдено коммитов для переноса"
+        exit 1
+    fi
+    
+    info "Будут перенесены ${#COMMITS[@]} коммит(ов):"
+    for commit in "${COMMITS[@]}"; do
+        echo "  - $(git log --oneline -1 $commit)"
+    done
+    
+    echo ""
+    read -p "Продолжить? (y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        error "Прервано пользователем"
+        exit 1
+    fi
+}
+
+# Функция создания или обновления ветки
+create_or_update_branch() {
+    local branch_name=$1
+    local base_branch=$2
+    
+    if ! git show-ref --verify --quiet "refs/heads/$branch_name"; then
+        success "Создание новой ветки: $branch_name"
+        git fetch origin "$base_branch:$base_branch" 2>/dev/null || true
+        git checkout -b "$branch_name" "$base_branch"
+    else
+        success "Переключение на существующую ветку: $branch_name"
+        git checkout "$branch_name"
+        
+        # Проверяем, есть ли на удаленном репозитории
+        if git ls-remote --exit-code --heads origin "$branch_name" >/dev/null 2>&1; then
+            info "Обновление из удаленного репозитория..."
+            git pull origin "$branch_name"
+        fi
+    fi
+}
+
+# Функция сохранения состояния
+save_state() {
+    local operation=$1
+    local current_branch=$2
+    shift 2
+    local commits=("$@")
+    
+    cat > "$STATE_FILE" <<EOF
+OPERATION=$operation
+ORIGINAL_BRANCH=$current_branch
+PARENT_JIRA=$PARENT_JIRA
+JIRA=$JIRA
+TARGET_ENV=${TARGET_ENV:-test}
+COMMITS=${commits[@]}
+EOF
+    
+    success "Состояние сохранено"
+    info "Для продолжения после разрешения конфликтов используйте: git flow continue"
+}
+
+# Функция загрузки состояния
+load_state() {
+    if [[ ! -f "$STATE_FILE" ]]; then
+        return 1
+    fi
+    
+    source "$STATE_FILE"
+    return 0
+}
+
+# Функция очистки состояния
+clear_state() {
+    if [[ -f "$STATE_FILE" ]]; then
+        rm "$STATE_FILE"
+    fi
+}
+
+# Функция проверки конфликтов
+check_conflicts() {
+    if git diff --name-only --diff-filter=U | grep -q .; then
+        return 0  # Есть конфликты
+    else
+        return 1  # Нет конфликтов
+    fi
+}
+
+# Функция отображения статуса конфликта
+show_conflict_status() {
+    error "Обнаружены конфликты!"
+    echo ""
+    warning "Файлы с конфликтами:"
+    git diff --name-only --diff-filter=U
+    echo ""
+    info "Разрешите конфликты и выполните:"
+    echo "  git add <файлы>"
+    echo "  git flow continue"
+}
+
+# Функция push с force-with-lease для обновления PR
+safe_push() {
+    local branch=$1
+    local force=${2:-false}
+    
+    if [[ "$force" == "true" ]]; then
+        info "Отправка изменений с обновлением истории (force-with-lease)..."
+        git push --force-with-lease origin "$branch"
+    else
+        info "Отправка изменений..."
+        git push origin "$branch"
+    fi
+}
+
+# Функция для красивого вывода итогов
+show_summary() {
+    local pr_branch=$1
+    
+    section "ЗАВЕРШЕНИЕ"
+    success "УСПЕШНО ЗАВЕРШЕНО"
+    echo -e "${BLUE}----------------------------------------${NC}"
+    echo -e "Ветка для PR: ${YELLOW}$pr_branch${NC}"
+    echo -e "${BLUE}----------------------------------------${NC}"
+    info "Создайте Pull Request или обновите существующий"
+}
+
+# Экспорт функций
+export -f section
+export -f error
+export -f warning
+export -f success
+export -f info
+export -f filter_changes
+export -f check_changes
+export -f parse_feature_branch
+export -f parse_hotfix_branch
+export -f get_branch_names
+export -f select_commits
+export -f create_or_update_branch
+export -f save_state
+export -f load_state
+export -f clear_state
+export -f check_conflicts
+export -f show_conflict_status
+export -f safe_push
+export -f show_summary

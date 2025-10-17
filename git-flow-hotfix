@@ -1,0 +1,197 @@
+#!/bin/bash
+
+# ==============================================
+# git-flow-hotfix - работа с hotfix
+# Автор: Сабиров Савелий Русланович
+# Версия: 2.0
+# ==============================================
+
+# Загружаем общие функции
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/git-flow-common"
+
+# Функция создания hotfix ветки
+create_hotfix() {
+    section "СОЗДАНИЕ HOTFIX ВЕТКИ"
+    
+    # Выбор типа hotfix
+    echo "Выберите тип hotfix:"
+    echo "  1) PE (Промышленная эксплуатация)"
+    echo "  2) OE (Опытная эксплуатация)"
+    echo "  3) IZ (Испытания)"
+    echo ""
+    read -p "Ваш выбор [1-3]: " -r type_choice
+    
+    case $type_choice in
+        1)
+            HOTFIX_TYPE="pe"
+            ;;
+        2)
+            HOTFIX_TYPE="oe"
+            ;;
+        3)
+            HOTFIX_TYPE="iz"
+            ;;
+        *)
+            error "Неверный выбор"
+            exit 1
+            ;;
+    esac
+    
+    # Получение номера версии
+    echo ""
+    echo "Введите версию (например, 01.02.03.4):"
+    read -r version
+    
+    if [[ ! "$version" =~ ^[0-9]{2}\.[0-9]{2}\.[0-9]{2}\.[0-9]+$ ]]; then
+        error "Неверный формат версии. Ожидается: XX.XX.XX.X"
+        exit 1
+    fi
+    
+    VERSION_BRANCH="versions/$HOTFIX_TYPE/$version"
+    
+    # Проверка существования версионной ветки
+    if ! git ls-remote --exit-code --heads origin "$VERSION_BRANCH" >/dev/null 2>&1; then
+        error "Версионная ветка $VERSION_BRANCH не найдена в удаленном репозитории"
+        exit 1
+    fi
+    
+    # Получение номера JIRA
+    echo ""
+    echo "Введите номер JIRA задачи (например, TASK-123):"
+    read -r jira
+    
+    HOTFIX_BRANCH="hotfixes/$HOTFIX_TYPE/$jira"
+    JIRA="$jira"
+    
+    # Создание ветки
+    info "Создание hotfix ветки: $HOTFIX_BRANCH от $VERSION_BRANCH"
+    
+    git fetch origin "$VERSION_BRANCH:$VERSION_BRANCH"
+    git checkout -b "$HOTFIX_BRANCH" "$VERSION_BRANCH"
+    
+    success "Hotfix ветка создана: $HOTFIX_BRANCH"
+    
+    # Выбор коммитов для cherry-pick
+    echo ""
+    echo "Теперь нужно выбрать коммиты для cherry-pick"
+    echo "Выберите источник:"
+    echo "  1) test"
+    echo "  2) release_oe"
+    echo "  3) release_pe"
+    echo ""
+    read -p "Ваш выбор [1-3]: " -r source_choice
+    
+    case $source_choice in
+        1)
+            SOURCE_BRANCH="test"
+            ;;
+        2)
+            SOURCE_BRANCH="release_oe"
+            ;;
+        3)
+            SOURCE_BRANCH="release_pe"
+            ;;
+        *)
+            error "Неверный выбор"
+            exit 1
+            ;;
+    esac
+    
+    git fetch origin "$SOURCE_BRANCH:$SOURCE_BRANCH"
+    
+    # Показываем коммиты
+    echo ""
+    info "Последние 20 коммитов из $SOURCE_BRANCH:"
+    git log --oneline -20 "$SOURCE_BRANCH"
+    
+    echo ""
+    echo "Введите хеш коммита для cherry-pick:"
+    read -r commit_hash
+    
+    if ! git cat-file -e "$commit_hash" 2>/dev/null; then
+        error "Коммит $commit_hash не найден"
+        exit 1
+    fi
+    
+    # Cherry-pick коммита
+    info "Выполняется cherry-pick коммита: $commit_hash"
+    
+    if ! git cherry-pick "$commit_hash"; then
+        if check_conflicts; then
+            save_state "hotfix-cherry-pick" "$HOTFIX_BRANCH"
+            show_conflict_status
+            exit 1
+        fi
+    fi
+    
+    success "Cherry-pick выполнен успешно"
+    
+    # Push ветки
+    safe_push "$HOTFIX_BRANCH" false
+    
+    success "Hotfix ветка $HOTFIX_BRANCH отправлена в удаленный репозиторий"
+    info "Создайте Pull Request в версионную ветку $VERSION_BRANCH"
+}
+
+# Функция push hotfix (если ветка уже создана)
+push_hotfix() {
+    section "ОТПРАВКА HOTFIX ИЗМЕНЕНИЙ"
+    
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    
+    if ! parse_hotfix_branch "$CURRENT_BRANCH"; then
+        error "Вы не в hotfix-ветке!"
+        info "Ожидается формат: hotfixes/(pe|oe|iz)/JIRA"
+        info "Текущая ветка: $CURRENT_BRANCH"
+        exit 1
+    fi
+    
+    success "Текущая hotfix ветка: $CURRENT_BRANCH"
+    info "Тип: $HOTFIX_TYPE"
+    info "JIRA: $JIRA"
+    
+    # Проверка изменений
+    if [[ -z "$(filter_changes)" ]]; then
+        info "Нет незафиксированных изменений"
+    else
+        warning "Есть незафиксированные изменения"
+        git status --short
+        echo ""
+        read -p "Закоммитить изменения? (y/n) " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo "Введите сообщение коммита:"
+            read -r commit_msg
+            git add .
+            git commit -m "$commit_msg"
+        fi
+    fi
+    
+    # Push ветки
+    safe_push "$CURRENT_BRANCH" false
+    
+    success "Hotfix ветка отправлена в удаленный репозиторий"
+    info "Создайте или обновите Pull Request"
+}
+
+# Главная функция
+main() {
+    local command=${1:-create}
+    
+    case $command in
+        create)
+            create_hotfix
+            ;;
+        push)
+            push_hotfix
+            ;;
+        *)
+            error "Неизвестная команда: $command"
+            echo "Доступные команды: create, push"
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
