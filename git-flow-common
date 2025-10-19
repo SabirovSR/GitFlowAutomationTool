@@ -127,7 +127,7 @@ select_commits() {
     
     echo ""
     echo "Сколько последних коммитов нужно довести?"
-    echo "Введите число или 'all' для всех коммитов (по умолчанию = all):"
+    echo "Введите число или 'all' для всех коммитов (Enter = all):"
     read -r commit_count
     
     if [[ "$commit_count" == "all" ]] || [[ -z "$commit_count" ]]; then
@@ -266,7 +266,7 @@ show_summary() {
     echo -e "${BLUE}-------------------------------------------------${NC}"
     echo -e "Ветка для PR: ${YELLOW}$pr_branch${NC}"
     echo -e "${BLUE}-------------------------------------------------${NC}"
-    info "Создайте Pull Request или обновите существующий"
+    info "Создайте Pull Request или обновился существующий"
 }
 
 # Экспорт функций
