@@ -114,23 +114,23 @@ select_commits() {
     
     section "ВЫБОР КОММИТОВ"
     
-    # Получаем общего предка с master
-    local base_commit=$(git merge-base HEAD master 2>/dev/null || echo "")
+    # Получаем общего предка с test
+    local base_commit=$(git merge-base HEAD test 2>/dev/null || echo "")
     
     if [[ -z "$base_commit" ]]; then
-        warning "Не удалось найти общего предка с master, показываем последние 20 коммитов"
+        warning "Не удалось найти общего предка с test, показываем последние 20 коммитов"
         git log --oneline -20
     else
-        info "Коммиты в текущей ветке (с момента ответвления от master):"
+        info "Коммиты в текущей ветке (с момента ответвления от test):"
         git log --oneline "${base_commit}..HEAD"
     fi
     
     echo ""
     echo "Сколько последних коммитов нужно довести?"
-    echo "Введите число или 'all' для всех коммитов:"
+    echo "Введите число или 'all' для всех коммитов (по умолчанию = all):"
     read -r commit_count
     
-    if [[ "$commit_count" == "all" ]]; then
+    if [[ "$commit_count" == "all" ]] || [[ -z "$commit_count" ]]; then
         if [[ -z "$base_commit" ]]; then
             error "Невозможно определить все коммиты без общего предка"
             exit 1
@@ -263,9 +263,9 @@ show_summary() {
     
     section "ЗАВЕРШЕНИЕ"
     success "УСПЕШНО ЗАВЕРШЕНО"
-    echo -e "${BLUE}----------------------------------------${NC}"
+    echo -e "${BLUE}-------------------------------------------------${NC}"
     echo -e "Ветка для PR: ${YELLOW}$pr_branch${NC}"
-    echo -e "${BLUE}----------------------------------------${NC}"
+    echo -e "${BLUE}-------------------------------------------------${NC}"
     info "Создайте Pull Request или обновите существующий"
 }
 
