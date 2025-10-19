@@ -56,7 +56,6 @@ echo "3. Проверка документации:"
 check "README.md" "[ -f ./README.md ]"
 check "QUICKSTART.md" "[ -f ./QUICKSTART.md ]"
 check "EXAMPLES.md" "[ -f ./EXAMPLES.md ]"
-check "START_HERE.md" "[ -f ./START_HERE.md ]"
 check "ARCHITECTURE.md" "[ -f ./ARCHITECTURE.md ]"
 
 echo ""
