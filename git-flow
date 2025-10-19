@@ -15,9 +15,9 @@ show_menu() {
     local current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
     
     clear
-    echo -e "${CYAN}╔════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}          ${MAGENTA}GitFlow Automation Tool v2.0${NC}              ${CYAN}║${NC}"
-    echo -e "${CYAN}╚════════════════════════════════════════════════════╝${NC}"
+    echo -e "${CYAN}╔════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}║${NC}          ${MAGENTA}GitFlow Automation Tool v2.0${NC}          ${CYAN}║${NC}"
+    echo -e "${CYAN}╚════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${BLUE}Текущая ветка:${NC} ${GREEN}$current_branch${NC}"
     echo ""
@@ -134,10 +134,10 @@ execute_action() {
 create_feature_branch() {
     section "СОЗДАНИЕ НОВОЙ FEATURE ВЕТКИ"
     
-    echo "Введите PARENT_JIRA (например, PROJ-123):"
+    echo "Введите PARENT_JIRA (например, JIRA-123):"
     read -r parent_jira
     
-    echo "Введите JIRA задачи (например, TASK-456):"
+    echo "Введите JIRA задачи (например, JIRA-321):"
     read -r jira
     
     local feature_branch="tasks/$parent_jira/$jira"
@@ -208,9 +208,9 @@ show_help() {
     echo "  hotfixes/iz/JIRA - hotfix для IZ"
     echo ""
     echo "ВЕРСИОННЫЕ ВЕТКИ:"
-    echo "  versions/pe/00.00.00.0"
-    echo "  versions/oe/00.00.00.0"
-    echo "  versions/iz/00.00.00.0"
+    echo "  versions/pe/00.00.00.00"
+    echo "  versions/oe/00.00.00.00"
+    echo "  versions/iz/00.00.00.00"
     echo ""
     echo "КОМАНДЫ:"
     echo "  git flow         - открыть интерактивное меню (этот экран)"
