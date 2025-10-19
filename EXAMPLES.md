@@ -14,21 +14,21 @@
 ## Создание новой задачи
 
 ### Сценарий
-Вам назначили новую задачу TASK-789 в проекте PROJ-123
+Вам назначили новую задачу JIRA-123 в проекте JIRA-321
 
 ### Действия
 ```bash
 # Вариант 1: Через меню
 git flow
 # Выбираем: "Создать новую задачу (Feature Branch)"
-# PARENT_JIRA: PROJ-123
-# JIRA: TASK-789
+# PARENT_JIRA: JIRA-123
+# JIRA: JIRA-321
 
 # Вариант 2: Вручную
 git fetch origin test:test
-git checkout -b tasks/PROJ-123/TASK-789 test
+git checkout -b tasks/JIRA-123/JIRA-321 test
 
-# Результат: вы на ветке tasks/PROJ-123/TASK-789
+# Результат: вы на ветке tasks/JIRA-123/JIRA-321
 ```
 
 ### Разработка
@@ -62,7 +62,7 @@ git commit -m "Обновлена документация"
 ```bash
 # Проверяем текущую ветку
 $ git branch
-* tasks/PROJ-123/TASK-789
+* tasks/JIRA-123/JIRA-321
 
 # Смотрим коммиты
 $ git log --oneline -5
@@ -79,9 +79,9 @@ $ git flow deliver
 ✔ Нет незафиксированных изменений
 
 === ПАРСИНГ ВЕТКИ ===
-✔ Текущая ветка: tasks/PROJ-123/TASK-789
-ℹ PARENT_JIRA: PROJ-123
-ℹ JIRA: TASK-789
+✔ Текущая ветка: tasks/JIRA-123/JIRA-321
+ℹ PARENT_JIRA: JIRA-123
+ℹ JIRA: JIRA-321
 
 === ВЫБОР КОММИТОВ ===
 ℹ Коммиты в текущей ветке (с момента ответвления от master):
@@ -108,10 +108,10 @@ i7j8k9l Добавлена новая функциональность
 
 Выберите [1-3] (Enter = test): 1
 ✔ Выбрано окружение: test
-ℹ Ветка для PR: tasks/PROJ-123/test_TASK-789
+ℹ Ветка для PR: tasks/JIRA-123/test_JIRA-321
 
 === STABLE ВЕТКА ===
-✔ Создание новой ветки: tasks/PROJ-123/stable_TASK-789
+✔ Создание новой ветки: tasks/JIRA-123/stable_JIRA-321
 
 === CHERRY-PICK ИЗМЕНЕНИЙ ===
 ℹ Перенос коммита 1/3: i7j8k9l Добавлена новая функциональность
@@ -127,40 +127,40 @@ i7j8k9l Добавлена новая функциональность
 
 Введите сообщение для объединенного коммита:
 (оставьте пустым для автогенерации)
-> [PROJ-123][TASK-789] Реализация новой функциональности
+> [JIRA-123][JIRA-321] Реализация новой функциональности
 
 ✔ Коммиты объединены
 ℹ Отправка изменений...
 ✔ Stable ветка отправлена в удаленный репозиторий
 
 === MERGE ВЕТКА (test) ===
-✔ Создание новой ветки: tasks/PROJ-123/test_TASK-789
+✔ Создание новой ветки: tasks/JIRA-123/test_JIRA-321
 
 === СЛИЯНИЕ STABLE ВЕТКИ ===
-ℹ Выполняется merge: tasks/PROJ-123/stable_TASK-789 -> tasks/PROJ-123/test_TASK-789
+ℹ Выполняется merge: tasks/JIRA-123/stable_JIRA-321 -> tasks/JIRA-123/test_JIRA-321
 ✔ Слияние выполнено успешно
 ℹ Отправка изменений...
-✔ Изменения отправлены в tasks/PROJ-123/test_TASK-789
+✔ Изменения отправлены в tasks/JIRA-123/test_JIRA-321
 
 === ВОЗВРАТ НА ИСХОДНУЮ ВЕТКУ ===
-✔ Возвращены на ветку: tasks/PROJ-123/TASK-789
+✔ Возвращены на ветку: tasks/JIRA-123/JIRA-321
 
 === ЗАВЕРШЕНИЕ ===
 ✔ УСПЕШНО ЗАВЕРШЕНО
-----------------------------------------
-Ветка для PR: tasks/PROJ-123/test_TASK-789
-----------------------------------------
+----------------------------------------------
+Ветка для PR: tasks/JIRA-123/test_JIRA-321
+----------------------------------------------
 ℹ Создайте Pull Request или обновите существующий
 ```
 
 ### Результат
-- Создана ветка `tasks/PROJ-123/stable_TASK-789` с одним squash коммитом
-- Создана ветка `tasks/PROJ-123/test_TASK-789` для PR
+- Создана ветка `tasks/JIRA-123/stable_JIRA-321` с одним squash коммитом
+- Создана ветка `tasks/JIRA-123/test_JIRA-321` для PR
 - Обе ветки отправлены в удаленный репозиторий
-- Вы вернулись на исходную ветку `tasks/PROJ-123/TASK-789`
+- Вы вернулись на исходную ветку `tasks/JIRA-123/JIRA-321`
 
 ### Следующие шаги
-1. Создайте Pull Request из `tasks/PROJ-123/test_TASK-789` в `test`
+1. Создайте Pull Request из `tasks/JIRA-123/test_JIRA-321` в `test`
 2. Дождитесь ревью и мерджа
 
 ---
@@ -172,7 +172,7 @@ PR создан, но ревьюер попросил исправить опе�
 
 ### Действия
 ```bash
-# Вы на ветке tasks/PROJ-123/TASK-789
+# Вы на ветке tasks/JIRA-123/JIRA-321
 $ vim src/feature.js
 # Исправляем опечатку
 
@@ -191,7 +191,7 @@ $ git flow deliver
 > 1  # test
 
 === STABLE ВЕТКА ===
-✔ Переключение на существующую ветку: tasks/PROJ-123/stable_TASK-789
+✔ Переключение на существующую ветку: tasks/JIRA-123/stable_JIRA-321
 ℹ Обновление из удаленного репозитория...
 
 === CHERRY-PICK ИЗМЕНЕНИЙ ===
@@ -202,16 +202,16 @@ $ git flow deliver
 [Y/n]: Y
 
 Введите сообщение для объединенного коммита:
-> [PROJ-123][TASK-789] Реализация новой функциональности (исправлена опечатка)
+> [JIRA-123][JIRA-321] Реализация новой функциональности (исправлена опечатка)
 
 ✔ Коммиты объединены
 ✔ Stable ветка отправлена в удаленный репозиторий
 
 === MERGE ВЕТКА (test) ===
-✔ Переключение на существующую ветку: tasks/PROJ-123/test_TASK-789
+✔ Переключение на существующую ветку: tasks/JIRA-123/test_JIRA-321
 ℹ Обновление из удаленного репозитория...
 
-ВНИМАНИЕ: Ветка tasks/PROJ-123/test_TASK-789 уже существует в удаленном репозитории
+ВНИМАНИЕ: Ветка tasks/JIRA-123/test_JIRA-321 уже существует в удаленном репозитории
 Это означает, что PR уже создан.
 
 Выберите действие:
@@ -225,7 +225,7 @@ $ git flow deliver
 === СЛИЯНИЕ STABLE ВЕТКИ ===
 ✔ Слияние выполнено успешно
 ℹ Отправка изменений с обновлением истории (force-with-lease)...
-✔ Изменения отправлены в tasks/PROJ-123/test_TASK-789
+✔ Изменения отправлены в tasks/JIRA-123/test_JIRA-321
 
 ...
 ```
@@ -258,26 +258,26 @@ $ git flow deliver
 > 2  # release_oe
 
 ✔ Выбрано окружение: release_oe
-ℹ Ветка для PR: tasks/PROJ-123/release_oe_TASK-789
+ℹ Ветка для PR: tasks/JIRA-123/release_oe_JIRA-321
 
 ...
 
 === MERGE ВЕТКА (release_oe) ===
-✔ Создание новой ветки: tasks/PROJ-123/release_oe_TASK-789
+✔ Создание новой ветки: tasks/JIRA-123/release_oe_JIRA-321
 
 === СЛИЯНИЕ STABLE ВЕТКИ ===
-ℹ Выполняется merge: tasks/PROJ-123/stable_TASK-789 -> tasks/PROJ-123/release_oe_TASK-789
+ℹ Выполняется merge: tasks/JIRA-123/stable_JIRA-321 -> tasks/JIRA-123/release_oe_JIRA-321
 ✔ Слияние выполнено успешно
 ...
 
 === ЗАВЕРШЕНИЕ ===
 ----------------------------------------
-Ветка для PR: tasks/PROJ-123/release_oe_TASK-789
+Ветка для PR: tasks/JIRA-123/release_oe_JIRA-321
 ----------------------------------------
 ```
 
 ### Результат
-- Создана ветка `tasks/PROJ-123/release_oe_TASK-789`
+- Создана ветка `tasks/JIRA-123/release_oe_JIRA-321`
 - Готова для PR в `release_oe`
 
 ---
@@ -345,7 +345,7 @@ $ git flow deliver
 ...
 
 === СЛИЯНИЕ STABLE ВЕТКИ ===
-ℹ Выполняется merge: tasks/PROJ-123/stable_TASK-789 -> tasks/PROJ-123/test_TASK-789
+ℹ Выполняется merge: tasks/JIRA-123/stable_JIRA-321 -> tasks/JIRA-123/test_JIRA-321
 ОШИБКА: Обнаружены конфликты!
 
 ВНИМАНИЕ: Файлы с конфликтами:
@@ -361,7 +361,7 @@ $ git flow continue
 === ПРОДОЛЖЕНИЕ MERGE В test ===
 ℹ Завершение merge...
 ✔ Merge завершен
-✔ Изменения отправлены в tasks/PROJ-123/test_TASK-789
+✔ Изменения отправлены в tasks/JIRA-123/test_JIRA-321
 ...
 ```
 
@@ -433,9 +433,9 @@ a1b2c3d Обновлена конфигурация
 ```bash
 $ git log --oneline -10
 a1b2c3d Финальные правки
-e4f5g6h Merge branch 'test' into tasks/PROJ-123/TASK-789  # merge коммит!
+e4f5g6h Merge branch 'test' into tasks/JIRA-123/JIRA-321  # merge коммит!
 i7j8k9l Доработка после ревью
-m1n2o3p Merge branch 'test' into tasks/PROJ-123/TASK-789  # merge коммит!
+m1n2o3p Merge branch 'test' into tasks/JIRA-123/JIRA-321  # merge коммит!
 q4r5s6t Добавлена функциональность
 ...
 ```
@@ -480,9 +480,9 @@ $ git flow
 ℹ Обнаружена незавершенная операция:
 
   Операция: stable-cherry-pick
-  Исходная ветка: tasks/PROJ-123/TASK-789
-  PARENT_JIRA: PROJ-123
-  JIRA: TASK-789
+  Исходная ветка: tasks/JIRA-123/JIRA-321
+  PARENT_JIRA: JIRA-123
+  JIRA: JIRA-321
   Целевое окружение: test
   Коммиты: a1b2c3d e4f5g6h
 
@@ -518,7 +518,7 @@ git flow deliver
 > all
 > 1
 > Y
-> [PROJ-123][TASK-789] Краткое описание всей работы
+> [JIRA-123][JIRA-321] Краткое описание всей работы
 ```
 
 ### Проверка перед доставкой
@@ -543,7 +543,7 @@ git cherry-pick --abort
 git merge --abort
 
 # 3. Вернуться на исходную ветку
-git checkout tasks/PROJ-123/TASK-789
+git checkout tasks/JIRA-123/JIRA-321
 
 # 4. Очистить состояние
 rm .git/git-flow-state

@@ -37,7 +37,7 @@ git flow hotfix create
 
 **Шаги:**
 1. Выберите тип (1 - PE, 2 - OE, 3 - IZ)
-2. Введите версию (XX.XX.XX.X)
+2. Введите версию (XX.XX.XX.XX)
 3. Введите JIRA
 4. Выберите источник коммита
 5. Введите хеш коммита
@@ -59,16 +59,16 @@ git flow continue
 
 ### Feature
 ```
-tasks/PROJ-123/TASK-456              # Ваша ветка разработки
-tasks/PROJ-123/stable_TASK-456       # Автоматически создается
-tasks/PROJ-123/test_TASK-456         # Ветка для PR
+tasks/JIRA-123/JIRA-321              # Ваша ветка разработки
+tasks/JIRA-123/stable_JIRA-321       # Автоматически создается
+tasks/JIRA-123/test_JIRA-321         # Ветка для PR
 ```
 
 ### Hotfix
 ```
-hotfixes/pe/TASK-456                 # Hotfix для PE
-hotfixes/oe/TASK-456                 # Hotfix для OE
-hotfixes/iz/TASK-456                 # Hotfix для IZ
+hotfixes/pe/JIRA-321                 # Hotfix для PE
+hotfixes/oe/JIRA-321                 # Hotfix для OE
+hotfixes/iz/JIRA-321                 # Hotfix для IZ
 ```
 
 ## Типичные сценарии
@@ -102,6 +102,5 @@ git flow deliver
 ✅ Всегда используйте squash в stable ветке  
 ✅ Проверяйте список коммитов перед доставкой  
 ✅ При конфликтах внимательно проверяйте код  
-✅ Используйте осмысленные сообщения для squash  
 
 📚 **Полная документация:** [README.md](README.md)

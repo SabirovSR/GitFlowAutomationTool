@@ -15,9 +15,9 @@ show_menu() {
     local current_branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
     
     clear
-    echo -e "${CYAN}╔════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${CYAN}╔════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${NC}          ${MAGENTA}GitFlow Automation Tool v2.0${NC}              ${CYAN}║${NC}"
-    echo -e "${CYAN}╚════════════════════════════════════════════════════════╝${NC}"
+    echo -e "${CYAN}╚════════════════════════════════════════════════════╝${NC}"
     echo ""
     echo -e "${BLUE}Текущая ветка:${NC} ${GREEN}$current_branch${NC}"
     echo ""
