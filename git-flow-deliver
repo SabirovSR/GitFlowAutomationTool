@@ -105,14 +105,89 @@ squash_commits() {
     
     info "Найдено $commit_count коммитов для объединения"
     
-    # Получаем сообщение для squash коммита
-    echo ""
-    echo "Введите сообщение для объединенного коммита:"
-    echo "(оставьте пустым для автогенерации)"
-    read -r squash_message
+    # Получаем сообщение из первого коммита
+    local first_commit_message=""
+    if [[ ${#COMMITS[@]} -gt 0 ]]; then
+        first_commit_message=$(git log --format=%s -1 "${COMMITS[0]}")
+    fi
     
+    # Выбираем способ получения сообщения для squash коммита
+    echo ""
+    echo "Выберите способ задания сообщения для объединенного коммита:"
+    
+    if [[ -n "$first_commit_message" ]]; then
+        echo "  1) Редактировать сообщение первого коммита (по умолчанию)"
+        echo "  2) Использовать сообщение первого коммита как есть"
+        echo "  3) Ввести полностью свое сообщение"
+        echo "  4) Автогенерированное сообщение"
+        echo ""
+        echo "Сообщение первого коммита: \"$first_commit_message\""
+        echo ""
+        read -p "Ваш выбор [1-4] (Enter = 1): " -r choice
+    else
+        echo "  1) Ввести свое сообщение (по умолчанию)"
+        echo "  2) Автогенерированное сообщение"
+        echo ""
+        read -p "Ваш выбор [1-2] (Enter = 1): " -r choice
+    fi
+    
+    # Обрабатываем выбор пользователя
+    case "${choice:-1}" in
+        1)
+            if [[ -n "$first_commit_message" ]]; then
+                # Редактирование сообщения первого коммита
+                echo ""
+                echo "Отредактируйте сообщение (текущее значение показано):"
+                read -e -i "$first_commit_message" -r squash_message
+            else
+                # Ввод своего сообщения
+                echo ""
+                echo "Введите сообщение для объединенного коммита:"
+                read -r squash_message
+            fi
+            ;;
+        2)
+            if [[ -n "$first_commit_message" ]]; then
+                # Использование сообщения первого коммита как есть
+                squash_message="$first_commit_message"
+                info "Используется сообщение первого коммита: $squash_message"
+            else
+                # Автогенерация
+                squash_message="[$PARENT_JIRA][$JIRA] Доставка изменений"
+                info "Используется автогенерированное сообщение: $squash_message"
+            fi
+            ;;
+        3)
+            if [[ -n "$first_commit_message" ]]; then
+                # Ввод своего сообщения
+                echo ""
+                echo "Введите сообщение для объединенного коммита:"
+                read -r squash_message
+            else
+                error "Неверный выбор"
+                exit 1
+            fi
+            ;;
+        4)
+            if [[ -n "$first_commit_message" ]]; then
+                # Автогенерация
+                squash_message="[$PARENT_JIRA][$JIRA] Доставка изменений"
+                info "Используется автогенерированное сообщение: $squash_message"
+            else
+                error "Неверный выбор"
+                exit 1
+            fi
+            ;;
+        *)
+            error "Неверный выбор"
+            exit 1
+            ;;
+    esac
+    
+    # Проверяем, что сообщение не пустое
     if [[ -z "$squash_message" ]]; then
-        squash_message="[$PARENT_JIRA][$JIRA] Доставка изменений"
+        error "Сообщение коммита не может быть пустым"
+        exit 1
     fi
     
     # Выполняем squash через reset и commit
